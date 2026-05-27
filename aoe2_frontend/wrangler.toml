@@ -1,0 +1,11 @@
+name = "aoe2-frontend"
+compatibility_date = "2026-05-27"
+compatibility_flags = ["nodejs_compat"]
+
+
+[browser]
+binding = "BROWSER"
+
+[[kv_namespaces]]
+binding = "aoe2_data"
+id = "ee5c521804b846c7a36e5c079c29c719"
