@@ -1,0 +1,1 @@
+Hey fellow aoe2 and stream enjoyers I whipped up a qucik webpage where we can track the current ladder ratings for the participants of Hera's aoe2 invitational.
