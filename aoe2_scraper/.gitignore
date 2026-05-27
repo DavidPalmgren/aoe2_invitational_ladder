@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+*.pyc
+.env
+playwright/.local-browsers/
+node_modules/

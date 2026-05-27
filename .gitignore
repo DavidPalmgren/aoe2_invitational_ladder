@@ -1,0 +1,11 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.env
+# Playwright
+playwright/.local-browsers/
+
+# Node/Vue
+node_modules/
+dist/
