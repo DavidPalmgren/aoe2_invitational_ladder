@@ -44,11 +44,11 @@ async function scrapePlayer(browser: any, player: Player): Promise<PlayerResult>
     console.log("➡️ Visiting:", player.name);
 
     await page.goto(player.url, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 30000,
     });
 
-    await page.waitForTimeout(5000);
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
     const result = await page.evaluate(() => {
       const el =
