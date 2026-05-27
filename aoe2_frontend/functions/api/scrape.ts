@@ -35,29 +35,34 @@ const PLAYERS: Player[] = [
 ];
 
 const CACHE_KEY = "leaderboard";
-const CACHE_DURATION_MS = 1000 * 60 * 30; // 30 minutes
+const CACHE_DURATION_MS = 1000 * 60 * 30;
 
 async function scrapePlayer(browser: any, player: Player): Promise<PlayerResult> {
   const page = await browser.newPage();
 
   try {
+    console.log("➡️ Visiting:", player.name);
+
     await page.goto(player.url, {
-      waitUntil: "domcontentloaded",
-      timeout: 15000,
+      waitUntil: "networkidle",
+      timeout: 30000,
     });
 
-    await page.waitForSelector(".rating-big", {
-      timeout: 10000,
-    });
+    await page.waitForTimeout(5000);
 
-    const ratingText = await page.evaluate(() => {
-      const el = document.querySelector(".rating-big");
+    const result = await page.evaluate(() => {
+      const el =
+        document.querySelector(".rating-big") ||
+        document.querySelector("[class*='rating']");
+
       return el?.textContent?.trim() || null;
     });
 
-    const rating = ratingText
-      ? parseInt(ratingText.replace(/,/g, ""), 10)
+    const rating = result
+      ? parseInt(result.replace(/,/g, ""), 10)
       : null;
+
+    console.log("✅ Scraped:", player.name, rating);
 
     await page.close();
 
@@ -67,7 +72,11 @@ async function scrapePlayer(browser: any, player: Player): Promise<PlayerResult>
       last_updated: new Date().toISOString(),
     };
   } catch (err: any) {
-    await page.close();
+    console.log("❌ Scrape failed:", player.name, err?.message);
+
+    try {
+      await page.close();
+    } catch {}
 
     return {
       ...player,
@@ -79,11 +88,17 @@ async function scrapePlayer(browser: any, player: Player): Promise<PlayerResult>
 }
 
 async function scrapeAllPlayers(context: any): Promise<PlayerResult[]> {
+  console.log("🚀 scrapeAllPlayers START");
+
   if (!context.env.BROWSER) {
     throw new Error("Browser binding missing");
   }
 
+  console.log("🧠 BROWSER binding OK");
+
   const browser = await puppeteer.launch(context.env.BROWSER);
+
+  console.log("🌐 Browser launched");
 
   const results: PlayerResult[] = [];
 
@@ -96,6 +111,10 @@ async function scrapeAllPlayers(context: any): Promise<PlayerResult[]> {
     await browser.close();
   }
 
+  const valid = results.filter(r => r.rating !== null);
+
+  console.log("📊 Valid results:", valid.length, "/", results.length);
+
   results.sort((a, b) => (b.rating || 0) - (a.rating || 0));
 
   return results;
@@ -103,71 +122,81 @@ async function scrapeAllPlayers(context: any): Promise<PlayerResult[]> {
 
 export async function onRequestGet(context: any) {
   try {
-    // 1. Try KV cache first
+    console.log("📥 API HIT");
+
     const cached = await context.env.aoe2_data.get(CACHE_KEY);
 
     if (cached) {
-      const parsed = JSON.parse(cached);
+      try {
+        const parsed = JSON.parse(cached);
+        const updatedAt = new Date(parsed.updated_at).getTime();
+        const cacheAge = Date.now() - updatedAt;
 
-      const cacheAge =
-        Date.now() - new Date(parsed.updated_at).getTime();
+        const valid =
+          parsed.updated_at &&
+          !isNaN(updatedAt) &&
+          cacheAge < CACHE_DURATION_MS;
 
-      // return cached data if still fresh
-      if (cacheAge < CACHE_DURATION_MS) {
-        return new Response(
-          JSON.stringify(parsed, null, 2),
-          {
+        if (valid) {
+          console.log("⚡ Returning cache");
+          return new Response(JSON.stringify(parsed, null, 2), {
             headers: {
               "Content-Type": "application/json",
-              "Cache-Control":
-                "public, s-maxage=300",
+              "Cache-Control": "public, s-maxage=300",
             },
-          }
-        );
+          });
+        }
+      } catch {
+        console.log("⚠️ Broken cache ignored");
       }
     }
 
-    // 2. Cache missing/stale → scrape fresh data
+    console.log("🔄 Cache expired → scraping");
+
     const results = await scrapeAllPlayers(context);
+
+    const validPlayers = results.filter(p => p.rating !== null);
+
+    console.log("💾 Writing KV...");
+
+    if (validPlayers.length === 0) {
+      console.log("❌ No valid data → skipping KV write");
+
+      return new Response(
+        JSON.stringify({
+          updated_at: new Date().toISOString(),
+          players: results,
+          warning: "No valid scraped data",
+        }),
+        { headers: { "Content-Type": "application/json" } }
+      );
+    }
 
     const payload = {
       updated_at: new Date().toISOString(),
       players: results,
     };
 
-    // 3. Save fresh data to KV
     await context.env.aoe2_data.put(
       CACHE_KEY,
       JSON.stringify(payload)
     );
 
-    // 4. Return fresh data
-    return new Response(
-      JSON.stringify(payload, null, 2),
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control":
-            "public, s-maxage=300",
-        },
-      }
-    );
+    console.log("✅ KV WRITE DONE");
+
+    return new Response(JSON.stringify(payload, null, 2), {
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "public, s-maxage=300",
+      },
+    });
+
   } catch (err: any) {
+    console.log("🔥 API ERROR:", err?.message);
+
     return new Response(
-      JSON.stringify(
-        {
-          error:
-            err?.message || "Internal server error",
-        },
-        null,
-        2
-      ),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
+      JSON.stringify({ error: err?.message || "Internal error" }),
+      { status: 500 }
     );
   }
 }
